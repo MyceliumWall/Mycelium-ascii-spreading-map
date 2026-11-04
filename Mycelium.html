@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mycelium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#040a05;--ink:#7dff8a;--dim:#2f8f3c;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#040a05;--ink:#7dff8a;--dim:#2f8f3c}}
+:root[data-theme="dark"]{--bg:#040a05;--ink:#7dff8a;--dim:#2f8f3c}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0;background:var(--bg)}
+body{overflow:hidden;font-family:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;color:var(--ink)}
+canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
+#hud{position:fixed;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom,0px));display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:12px;pointer-events:none}
+#stats{color:var(--dim);background:rgba(4,10,5,.75)}
+button{pointer-events:auto;font:inherit;color:var(--ink);background:rgba(4,10,5,.85);border:1px solid var(--dim);padding:4px 10px;cursor:pointer}
+button:hover,button:focus-visible{background:var(--ink);color:var(--bg);outline:none}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Spreading fungal network in green ASCII. Click to inoculate, drag to feed."></canvas>
+<div id="hud"><button id="reset" type="button">reset</button><span id="stats"></span></div>
+<script>
+const cv=document.getElementById('c'),cx=cv.getContext('2d'),stats=document.getElementById('stats');
+const FS=14,LH=16,RAMP='.:-=+*#%@',FONT="'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace";
+const PAL=[];for(let i=0;i<12;i++){const t=i/11;PAL.push(`rgb(${Math.round(12+t*t*190)},${Math.round(58+t*197)},${Math.round(22+t*t*170)})`)}
+const TOP=PAL.length-1,calm=matchMedia('(prefers-reduced-motion:reduce)').matches;
+let CW=8.4,AR=.52,W=0,H=0,dpr=1,dens,nut,ph,S,tips=[],spores=[],shrooms=[],pulses=[],started=false,down=false,lastCell=-1,last=0,lastStat=0;
+function newSeed(){S=[Math.random()*99,Math.random()*99,Math.random()*99]}
+function soil(x,y){const v=.5+.28*Math.sin(x*.09+S[0]+Math.sin(y*.06+S[1])*2.2)+.22*Math.sin(y*.15+S[2]+Math.cos(x*.07+S[0])*2.5);return Math.max(.05,Math.min(1,v))}
+newSeed();
+function size(){
+  dpr=Math.min(devicePixelRatio||1,2);
+  const r=cv.getBoundingClientRect();
+  cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr);
+  cx.setTransform(dpr,0,0,dpr,0,0);cx.font=`${FS}px ${FONT}`;cx.textBaseline='top';
+  CW=cx.measureText('M').width;AR=CW/LH;
+  const w=Math.max(10,Math.floor(r.width/CW)),h=Math.max(10,Math.floor(r.height/LH));
+  if(w===W&&h===H)return;
+  const od=dens,on=nut,ow=W,oh=H;
+  W=w;H=h;dens=new Float32Array(W*H);nut=new Float32Array(W*H);ph=new Float32Array(W*H);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const i=y*W+x,old=ow&&x<ow&&y<oh;
+    ph[i]=Math.random()*6.28;
+    nut[i]=old?on[y*ow+x]:soil(x,y);
+    if(old)dens[i]=od[y*ow+x];
+  }
+  tips=tips.filter(t=>t.x<W&&t.y<H);spores=spores.filter(s=>s.x<W&&s.y<H);shrooms=shrooms.filter(s=>s.x<W&&s.y<H);
+}
+function reset(){newSeed();started=false;tips=[];spores=[];shrooms=[];pulses=[];dens.fill(0);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)nut[y*W+x]=soil(x,y)}
+function feed(x,y,r,amt){
+  for(let j=-r;j<=r;j++)for(let k=-r*2;k<=r*2;k++){
+    const xx=x+k,yy=y+j;if(xx<0||yy<0||xx>=W||yy>=H)continue;
+    const d=Math.hypot(k*CW,j*LH)/CW/(r*2);if(d>=1)continue;
+    const i=yy*W+xx;nut[i]=Math.min(1,nut[i]+amt*(1-d));
+  }
+}
+function emit(x,y,n,speed){
+  for(let k=0;k<n&&spores.length<400;k++){
+    const a=Math.random()*6.283,sp=(.35+Math.random()*.9)*speed;
+    spores.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp*AR,life:22+Math.random()*40});
+  }
+}
+function inoculate(x,y){
+  started=true;
+  const i=y*W+x,established=dens[i]>.5;
+  feed(x,y,7,.65);dens[i]=1;
+  const n=established?3:6;
+  for(let k=0;k<n&&tips.length<700;k++)tips.push({x,y,a:k/n*6.283+Math.random(),l:60+Math.random()*60});
+  emit(x,y,established?26:14,1.3);
+  if(pulses.length<8)pulses.push({x,y,r:0});
+  for(const s of shrooms)if(Math.hypot((s.x-x)*CW,(s.y-y)*LH)<CW*18)emit(s.x,s.y-1,6,1);
+}
+function grow(){
+  for(let k=tips.length-1;k>=0;k--){
+    const t=tips[k];let bs=-9,bx=0,by=0,ba=0;
+    for(let j=-1;j<=1;j++){
+      const a=t.a+j*.6+(Math.random()-.5)*.6,x=t.x+Math.cos(a),y=t.y+Math.sin(a)*AR;
+      const ix=Math.round(x),iy=Math.round(y);
+      if(ix<0||iy<0||ix>=W||iy>=H)continue;
+      const i=iy*W+ix,s=nut[i]*(1-.5*dens[i])+Math.random()*.45;
+      if(s>bs){bs=s;bx=x;by=y;ba=a}
+    }
+    if(bs<-5){tips.splice(k,1);continue}
+    t.x=bx;t.y=by;t.a=ba;
+    const i=Math.round(by)*W+Math.round(bx);
+    dens[i]=Math.min(1,dens[i]+.3);
+    t.l-=1+(nut[i]<.15?2:0)+(dens[i]>.9?1.5:0);
+    nut[i]=Math.max(0,nut[i]-.02);
+    if(t.l<=0){tips.splice(k,1);continue}
+    if(tips.length<700&&Math.random()<.04+.07*nut[i])tips.push({x:bx,y:by,a:ba+(Math.random()<.5?-1:1)*(.5+Math.random()),l:t.l*.75});
+  }
+  for(let n=0;n<3&&shrooms.length<45;n++){
+    const x=Math.floor(Math.random()*W),y=2+Math.floor(Math.random()*(H-3));
+    if(Math.random()<.1&&dens[y*W+x]>.85&&!shrooms.some(s=>Math.abs(s.x-x)<7&&Math.abs(s.y-y)<3))
+      shrooms.push({x,y,age:0,life:420+Math.random()*400});
+  }
+  for(let k=shrooms.length-1;k>=0;k--){
+    const s=shrooms[k];s.age++;
+    if(s.age>30&&Math.random()<.015)emit(s.x,s.y-1,3,1);
+    if(s.age>s.life){feed(s.x,s.y,4,.4);shrooms.splice(k,1)}
+  }
+  for(let k=spores.length-1;k>=0;k--){
+    const p=spores[k];
+    p.x+=p.vx+(Math.random()-.5)*.25;p.y+=p.vy+(Math.random()-.5)*.1;p.vx*=.96;p.vy*=.96;p.life--;
+    if(p.life>0&&p.x>=0&&p.y>=0&&p.x<W&&p.y<H)continue;
+    const ix=Math.round(p.x),iy=Math.round(p.y);
+    if(ix>=0&&iy>=0&&ix<W&&iy<H){
+      const i=iy*W+ix;
+      if(nut[i]>.2&&dens[i]<.6&&tips.length<700){tips.push({x:ix,y:iy,a:Math.random()*6.283,l:50+Math.random()*50});dens[i]=Math.max(dens[i],.5)}
+    }
+    spores.splice(k,1);
+  }
+}
+const buckets=PAL.map(()=>[]);
+function put(l,x,y,c){buckets[Math.max(0,Math.min(TOP,l))].push(x,y,c)}
+function draw(t){
+  requestAnimationFrame(draw);
+  if(t-last>45){last=t;grow()}
+  for(let k=pulses.length-1;k>=0;k--){pulses[k].r+=.55;if(pulses[k].r>28)pulses.splice(k,1)}
+  const w=cv.width/dpr,h=cv.height/dpr;
+  cx.fillStyle='#040a05';cx.fillRect(0,0,w,h);
+  for(const b of buckets)b.length=0;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const i=y*W+x,d=dens[i];let g=0;
+    for(const p of pulses){
+      const dd=Math.abs(Math.hypot((x-p.x)*CW,(y-p.y)*LH)/CW-p.r);
+      if(dd<1.6)g=Math.max(g,(1-dd/1.6)*(1-p.r/28));
+    }
+    if(d>.02){
+      const sh=calm?0:Math.sin(t*.004+ph[i])*.6;
+      put(Math.floor(d*7+g*4+sh),x,y,RAMP[Math.min(RAMP.length-1,Math.floor(d*RAMP.length))]);
+    }else if(g>.15)put(Math.floor(g*8),x,y,'+');
+    else{const n=nut[i];if(n>.8)put(1,x,y,':');else if(n>.55)put(0,x,y,'.')}
+  }
+  for(const p of spores)put(TOP-1,Math.round(p.x),Math.round(p.y),p.life%2?'.':"'");
+  for(const s of shrooms){
+    const fade=s.age>s.life-40,l=fade?5:TOP;
+    if(s.age<10)put(l,s.x,s.y,'i');
+    else{put(l,s.x,s.y,'|');if(s.age<30)put(l,s.x,s.y-1,'o');else{put(l,s.x-1,s.y-1,'(');put(TOP,s.x,s.y-1,'@');put(l,s.x+1,s.y-1,')')}}
+  }
+  for(let l=0;l<PAL.length;l++){
+    const b=buckets[l];if(!b.length)continue;
+    cx.fillStyle=PAL[l];
+    for(let k=0;k<b.length;k+=3){
+      const x=b[k],y=b[k+1];if(x<0||y<0||x>=W||y>=H)continue;
+      cx.fillText(b[k+2],x*CW,y*LH);
+    }
+  }
+  if(!started){
+    const lines=['click anywhere to inoculate','drag to feed the soil'];
+    cx.fillStyle=PAL[7];
+    lines.forEach((s,k)=>cx.fillText(s,Math.round((w-s.length*CW)/2),Math.round(h/2+k*LH*1.6-LH)));
+  }
+  if(t-lastStat>400){
+    lastStat=t;let c=0;for(let i=0;i<dens.length;i++)if(dens[i]>.1)c++;
+    stats.textContent=`colonized ${Math.round(c/dens.length*100)}%  tips ${tips.length}  fruiting ${shrooms.length}`;
+  }
+}
+function cell(e){const r=cv.getBoundingClientRect();
+  return [Math.max(0,Math.min(W-1,Math.floor((e.clientX-r.left)/CW))),Math.max(0,Math.min(H-1,Math.floor((e.clientY-r.top)/LH)))]}
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);down=true;const[x,y]=cell(e);lastCell=y*W+x;inoculate(x,y)});
+cv.addEventListener('pointermove',e=>{
+  if(!down)return;const[x,y]=cell(e),i=y*W+x;if(i===lastCell)return;lastCell=i;
+  feed(x,y,3,.3);started=true;
+  if(tips.length<700&&Math.random()<.5)tips.push({x,y,a:Math.random()*6.283,l:40+Math.random()*40});
+  if(Math.random()<.3)emit(x,y,3,.8);
+});
+const up=()=>{down=false};cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+document.getElementById('reset').addEventListener('click',reset);
+addEventListener('resize',size);
+size();requestAnimationFrame(draw);
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(size);
+</script>
+</body>
+</html>
